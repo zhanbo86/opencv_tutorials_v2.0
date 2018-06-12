@@ -17,10 +17,10 @@ struct LINE
     PT pStart;
     PT pEnd;
 };
-Point CrossPoint(const LINE *line1, const LINE *line2)
+Point2f CrossPoint(const LINE *line1, const LINE *line2)
 {
 
-    Point pt;
+    Point2f pt;
     // line's cpmponent ,y = a1*x + b
     int dx1 = line1->pEnd.x-line1->pStart.x;
     int dx2 = line2->pEnd.x-line2->pStart.x;
@@ -34,8 +34,8 @@ Point CrossPoint(const LINE *line1, const LINE *line2)
 
       if(abs(a1-a2)>0.5)//two lines are not parrele lines
       {
-        pt.x = (int)(((float)(b2-b1))/((float)(a1-a2)));
-        pt.y = (int)(((float)(a1*b2-a2*b1))/((float)(a1-a2)));
+        pt.x = (float)(((float)(b2-b1))/((float)(a1-a2)));
+        pt.y = (float)(((float)(a1*b2-a2*b1))/((float)(a1-a2)));
         return pt;
       }
       else
@@ -108,24 +108,68 @@ int main()
   double min_distance_vert = plate_width_pixels*0.5;
 
 
-
-
   ///***********************************process image*************************************///
-  Mat image = imread("/home/zb/BoZhan/OpenCV/BMT0602/2.bmp", IMREAD_GRAYSCALE);
+  Mat image = imread("/home/zb/BoZhan/OpenCV/Calibration/BMT0610/2.bmp", IMREAD_GRAYSCALE);
 	if (!image.data)
 		return -1;
+
+
+  //Undistort image
+  Mat cameraMatrix_ = Mat::eye(3,3,CV_64F);
+  Mat distCoeff_ = Mat::eye(1,5,CV_64F);
+  cameraMatrix_.at<double>(0, 0) = cameraMatrix_00;
+  cameraMatrix_.at<double>(0, 1) = cameraMatrix_01;
+  cameraMatrix_.at<double>(0, 2) = cameraMatrix_02;
+  cameraMatrix_.at<double>(1, 0) = cameraMatrix_10;
+  cameraMatrix_.at<double>(1, 1) = cameraMatrix_11;
+  cameraMatrix_.at<double>(1, 2) = cameraMatrix_12;
+  cameraMatrix_.at<double>(2, 0) = cameraMatrix_20;
+  cameraMatrix_.at<double>(2, 1) = cameraMatrix_21;
+  cameraMatrix_.at<double>(2, 2) = cameraMatrix_22;
+  distCoeff_.at<double>(0, 0) = distCoeff_00;
+  distCoeff_.at<double>(0, 1) = distCoeff_01;
+  distCoeff_.at<double>(0, 2) = distCoeff_02;
+  distCoeff_.at<double>(0, 3) = distCoeff_03;
+  distCoeff_.at<double>(0, 4) = distCoeff_04;
+  std::cout<<"cameraMatrix_ = "<<std::endl;
+  std::cout<<cameraMatrix_<<std::endl;
+  std::cout<<"distCoeff_ = "<<std::endl;
+  std::cout<<distCoeff_<<std::endl;
+
+  Mat map1, map2;
+  Mat image_undist = image.clone();
+  Size imageSize = CvSize(image.cols,image.rows);
+  printf("image size = %d * %d\n",imageSize.width,imageSize.height);
+  initUndistortRectifyMap(cameraMatrix_, distCoeff_, Mat(),getOptimalNewCameraMatrix(cameraMatrix_, distCoeff_, imageSize, 1, imageSize, 0),
+                          imageSize, CV_32FC1, map1, map2);
+  remap(image, image_undist, map1, map2, INTER_LINEAR);
+//  undistort(image, image_undist, cameraMatrix_, distCoeff_);
+  namedWindow("source", 0);
+  imshow("source", image);
+  namedWindow("image_undist", 0);
+  imshow("image_undist", image_undist);
+  waitKey(0);
+  cvDestroyWindow("source");
+  cvDestroyWindow("image_undist");
+
+
+  //get ROI to prevent edge error
+  //???????
+  Rect rectROI(image_undist.cols * 0.02,image_undist.rows * 0.02,image_undist.cols * 0.96,image_undist.rows * 0.96);
+  Mat image_undist_ROI = image_undist(rectROI);
+  namedWindow("image_undist_ROI", 0);
+  imshow("image_undist_ROI", image_undist_ROI);
+  waitKey(0);
+  cvDestroyWindow("image_undist_ROI");
+
+  //image filter
 	Mat img_filter;
-	blur(image, img_filter, Size(3, 3));//先使用3*3内核来降噪
+  blur(image_undist_ROI, img_filter, Size(3, 3));//先使用3*3内核来降噪
 	//GaussianBlur(image, img_filter, Size(3, 3), 0, 0);
 	//bilateralFilter(image, img_filter, 25, 25 * 2, 25 / 2);
 	//img_filter = image;
 	
 	std::cout << "image  = " << image.cols << " * " << image.rows << " / " << "channels = " << image.channels() << std::endl;
-	namedWindow("source", 0);
-	imshow("source", img_filter);
-	waitKey(0);
-	cvDestroyWindow("source");
-
 	Mat RGBImg;
 	cvtColor(img_filter, RGBImg, CV_GRAY2BGR);
 
@@ -153,8 +197,8 @@ int main()
     canny_contour_length = arcLength(canny_contours[i], true);
     if(canny_contour_length<30)
     {
-      Rect rect = boundingRect(canny_contours[i]);
-      rectangle(img_canny_1,cvPoint(rect.x,rect.y),cvPoint(rect.x+rect.width ,rect.y+rect.height),CV_RGB(0,0,0),-1,CV_AA,0);
+      Rect rect_canny = boundingRect(canny_contours[i]);
+      rectangle(img_canny_1,cvPoint(rect_canny.x,rect_canny.y),cvPoint(rect_canny.x+rect_canny.width ,rect_canny.y+rect_canny.height),CV_RGB(0,0,0),-1,CV_AA,0);
     }
   }
   Mat canny_thresh;
@@ -167,6 +211,7 @@ int main()
 
 
   //find contours points
+  vector<Point> contoursPoints;
   Mat img_contours(canny_thresh.rows,canny_thresh.cols,CV_8UC1,Scalar(0, 0, 0));
   uchar* p_canny = canny_thresh.ptr<uchar>(0);
   uchar* p_img = img_contours.ptr<uchar>(0);
@@ -179,6 +224,7 @@ int main()
       if(p_canny[j]==255)
       {
         p_img[j]=255;
+        contoursPoints.push_back(cvPoint(j,i));
         break;
       }
     }
@@ -192,6 +238,7 @@ int main()
       if(p_canny[j]==255)
       {
         p_img[j]=255;
+        contoursPoints.push_back(cvPoint(j,i));
         break;
       }
     }
@@ -205,6 +252,7 @@ int main()
       if(p_canny[i+j*canny_thresh.cols]==255)
       {
         p_img[i+j*canny_thresh.cols] = 255;
+        contoursPoints.push_back(cvPoint(i,j));
         break;
       }
     }
@@ -216,6 +264,7 @@ int main()
       if(p_canny[i+j*canny_thresh.cols]==255)
       {
         p_img[i+j*canny_thresh.cols] = 255;
+        contoursPoints.push_back(cvPoint(i,j));
         break;
       }
     }
@@ -225,7 +274,49 @@ int main()
   waitKey(0);
   cvDestroyWindow("img_contours");
 
+//  RotatedRect rect_contour=minAreaRect(contoursPoints);
+//  Point2f P_conners[4];
+//  rect_contour.points(P_conners);
+//  Mat four_lines_result = RGBImg.clone();
+//  for(int j=0;j<=3;j++)
+//  {
+//      line(four_lines_result,P_conners[j],P_conners[(j+1)%4],Scalar(0,255,0),2);
+////      circle(four_lines_result, P_conners[i], 10, Scalar(0, 255, 0),-1);
+//  }
+//  double x0,y0,alpha;
+//  x0 = rect_contour.center.x;                    //  ????
+//  y0 = rect_contour.center.y;
+//  alpha = -rect_contour.angle*CV_PI/180;         //  ???????
+//  //???????
+//  circle(four_lines_result, Point2f(x0,y0), 10, Scalar(0, 255, 0),-1);
 
+//  namedWindow("lines", 0);
+//  imshow("lines", four_lines_result);
+//  waitKey(0);
+
+//  Point cross_P0,cross_P1,cross_P2,cross_P3;
+//  for(int i=0;i<4;i++)
+//  {
+//    if((P_conners[i].x<x0-10)&&(P_conners[i].y<y0-10))
+//    {
+//      cross_P0 = P_conners[i];
+//    }
+//    if((P_conners[i].x>x0+10)&&(P_conners[i].y<y0-10))
+//    {
+//      cross_P1 = P_conners[i];
+//    }
+//    if((P_conners[i].x>x0+10)&&(P_conners[i].y>y0+10))
+//    {
+//      cross_P2 = P_conners[i];
+//    }
+//    if((P_conners[i].x<x0-10)&&(P_conners[i].y>y0+10))
+//    {
+//      cross_P3 = P_conners[i];
+//    }
+//  }
+
+
+//// close and open operation to find contours
 ////  cv::Mat element_close(200,200,CV_8U,cv::Scalar(1));
 //  cv::Mat element_close(close_thread,close_thread,CV_8U,cv::Scalar(1));
 //  cv::Mat closed;
@@ -457,10 +548,10 @@ int main()
   lineRight.pEnd.x = line_vert_right[2];
   lineRight.pEnd.y = line_vert_right[3];
 
-  Point cross_P0 = CrossPoint(&lineTop, &lineLeft);
-  Point cross_P1 = CrossPoint(&lineTop, &lineRight);
-  Point cross_P2 = CrossPoint(&lineBottom, &lineRight);
-  Point cross_P3 = CrossPoint(&lineBottom, &lineLeft);
+  Point2f cross_P0 = CrossPoint(&lineTop, &lineLeft);
+  Point2f cross_P1 = CrossPoint(&lineTop, &lineRight);
+  Point2f cross_P2 = CrossPoint(&lineBottom, &lineRight);
+  Point2f cross_P3 = CrossPoint(&lineBottom, &lineLeft);
 
   if((!(cross_P0.x==0&&cross_P0.y==0))&&(!(cross_P1.x==0&&cross_P1.y==0))
      &&(!(cross_P2.x==0&&cross_P2.y==0))&&(!(cross_P3.x==0&&cross_P3.y==0)))
@@ -476,10 +567,10 @@ int main()
   //************************************locate string *****************************************//
  std::vector<Point2f> plate_real;
  std::vector<Point2f> plate_scene;
- Point plate_real_p0 = cvPoint(0,0);
- Point plate_real_p1 = cvPoint(plate_width,0);
- Point plate_real_p2 = cvPoint(plate_width,plate_height);
- Point plate_real_p3 = cvPoint(0,plate_height);
+ Point2f plate_real_p0 = cvPoint(0,0);
+ Point2f plate_real_p1 = cvPoint(plate_width*100-1,0);//one pixel per 0.01mm
+ Point2f plate_real_p2 = cvPoint(plate_width*100-1,plate_height*100-1);
+ Point2f plate_real_p3 = cvPoint(0,plate_height*100);
  plate_real.push_back(plate_real_p0);
  plate_real.push_back(plate_real_p1);
  plate_real.push_back(plate_real_p2);
@@ -488,15 +579,17 @@ int main()
  plate_scene.push_back(cross_P1);
  plate_scene.push_back(cross_P2);
  plate_scene.push_back(cross_P3);
- Mat H = findHomography( plate_real, plate_scene, CV_RANSAC );
+
+
+ Mat H_perspect = findHomography( plate_real, plate_scene, CV_RANSAC );
 
  std::vector<Point2f> plate_string(4);
- plate_string[0] = cvPoint(string_x,string_y);
- plate_string[1] = cvPoint(string_x + string_width, string_y);
- plate_string[2] = cvPoint(string_x + string_width, string_y + string_height );
- plate_string[3] = cvPoint(string_x, string_y + string_height );
+ plate_string[0] = cvPoint(string_x*100-1,string_y*100-1);
+ plate_string[1] = cvPoint(string_x*100 + string_width*100-1, string_y*100-1);
+ plate_string[2] = cvPoint(string_x*100 + string_width*100-1, string_y*100 + string_height*100-1 );
+ plate_string[3] = cvPoint(string_x*100-1, string_y*100 + string_height*100-1 );
  std::vector<Point2f> scene_string(4);
- perspectiveTransform( plate_string, scene_string, H);
+ perspectiveTransform( plate_string, scene_string, H_perspect);
  std::vector<Point2f> scene_string_expand(4);
  scene_string_expand[0].x =  scene_string[0].x - string_pos_dx;
  scene_string_expand[0].y =  scene_string[0].y - string_pos_dy;
